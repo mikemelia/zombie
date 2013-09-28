@@ -4,13 +4,20 @@ FIXME: description
 
 ## Installation
 
-Download from http://example.com/FIXME.
+### Install FastMPJ
+Download the installation from http://torusware.com/nevonproducts/fastmpj/ and follow the installation instructions.
+
+### Install FastMPJ library in local repo.
+cd to $FMPJ_HOME (as defined in the FastMPJ installation instructions).
+    $ mvn install:install-file -Dfile=lib/mpj.jar -DgroupId=fastmpj -DartifactId=mpj -Dversion=1.0 -Dpackaging=jar
+    $ mvn install:install-file -Dfile=lib/xxdev.jar -DgroupId=fastmpj -DartifactId=xxdev -Dversion=1.0 -Dpackaging=jar
+
 
 ## Usage
 
-FIXME: explanation
+    $ lein uberjar
+    $ fmpjrun -np 20 -jar target/zombie-0.1.0-SNAPSHOT-standalone.jar
 
-    $ java -jar zombie-0.1.0-standalone.jar [args]
 
 ## Options
 
