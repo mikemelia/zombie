@@ -8,7 +8,9 @@ FIXME: description
 Download the installation from http://torusware.com/nevonproducts/fastmpj/ and follow the installation instructions.
 
 ### Install FastMPJ library in local repo.
-cd to $FMPJ_HOME (as defined in the FastMPJ installation instructions).
+
+
+    $ cd $FMPJ_HOME
     $ mvn install:install-file -Dfile=lib/mpj.jar -DgroupId=fastmpj -DartifactId=mpj -Dversion=1.0 -Dpackaging=jar
     $ mvn install:install-file -Dfile=lib/xxdev.jar -DgroupId=fastmpj -DartifactId=xxdev -Dversion=1.0 -Dpackaging=jar
 
