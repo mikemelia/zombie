@@ -3,10 +3,12 @@
 (def processing-in-parallel? (atom false))
 
 (defn in-parallel
-  [function args]
+  [rank size function args]
   (do
     (mpi.MPI/Init args)
     (reset! processing-in-parallel? true)
+    (reset! size (.Size mpi.MPI/COMM_WORLD))
+    (reset! rank (.Rank mpi.MPI/COMM_WORLD))
     (function)
     (reset! processing-in-parallel? false)
     (mpi.MPI/Finalize)))
@@ -21,10 +23,14 @@
     #(mpi.MPI/Get_processor_name)
     1))
 
-(defn my-rank
-  []
-  (parallel-if #(.Rank mpi.MPI/COMM_WORLD) 1))
+(defn send-to
+  [message destination]
+  (.Isend mpi.MPI/COMM_WORLD (char-array message) 0 (count message) mpi.MPI/CHAR destination 1))
 
-(defn size
+
+(defn receive-from
   []
-  (parallel-if #(.Size mpi.MPI/COMM_WORLD) 1))
+  (let [count 4096
+        message (char-array count)]
+    (.Recv mpi.MPI/COMM_WORLD message 0 count mpi.MPI/CHAR mpi.MPI/ANY_SOURCE mpi.MPI/ANY_TAG)
+    (String. message)))
