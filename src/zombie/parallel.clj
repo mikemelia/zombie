@@ -29,8 +29,8 @@
 
 
 (defn receive-from
-  []
-  (let [count 4096
-        message (char-array count)]
-    (.Recv mpi.MPI/COMM_WORLD message 0 count mpi.MPI/CHAR mpi.MPI/ANY_SOURCE mpi.MPI/ANY_TAG)
-    (String. message)))
+  ([] (receive-from 8192))
+  ([count]
+     (let [message (char-array count)]
+       (.Recv mpi.MPI/COMM_WORLD message 0 count mpi.MPI/CHAR mpi.MPI/ANY_SOURCE mpi.MPI/ANY_TAG)
+       (String. message))))

@@ -1,16 +1,19 @@
 (ns zombie.core
   (:require [zombie.parallel :as parallel]
-            [clojure.tools.reader.edn :as edn])
+            [zombie.draw :as draw])
   (:gen-class))
 
-(def chance-of-infection 0.75)
-(def purposeful-movement-threshold 9)
-(def num-cycles (atom 1000))
-(def num-threads 5)
-(def initial-population 233300)
+(def chance-of-infection 0.25)
+(def purposeful-movement-threshold 32)
+(def num-cycles (atom 500))
+(def num-threads 10)
+;;(def initial-population 233300)
+;;(def mesh-width 1000)
+;;(def mesh-length 1500)
+(def initial-population (* 4 2333))
+(def mesh-width 200)
+(def mesh-length 300)
 (def population-after-exodus (/ initial-population 2))
-(def mesh-width 1000)
-(def mesh-length 1500)
 (def population-per-square-km (/ population-after-exodus (* mesh-width mesh-length)))
 (def hostname (.getHostName (java.net.InetAddress/getLocalHost)))
 (def cluster-size (atom 1))
@@ -18,7 +21,7 @@
 (defrecord Mesh [rank thread x y width length population])
 (defrecord Location [x y])
 (defrecord Person [gender age infection-status location])
-
+(defn max-buffer-size [] (+ 100 (/ (* (+ 20 (count (with-out-str (println (->Person :female :adult :susceptible (->Location mesh-width mesh-length)))))) initial-population) (dec @cluster-size))))
 (defn has-human?
   []
   (< (rand) population-per-square-km))
@@ -58,9 +61,13 @@
 
 (defn create-mesh
   [rank thread num-processes num-threads-this-process]
-  (let [thread-width (/ mesh-width num-threads-this-process)
-        thread-length (/ mesh-length num-processes)]
-    (create-population thread-width thread-length (* thread thread-width) (* rank thread-length))
+  (let [thread-width (inc (quot mesh-width num-threads-this-process))
+        thread-length (inc (quot mesh-length num-processes))
+        width-start (* thread thread-width)
+        length-start (* rank thread-length)
+        real-width (if (= (inc thread) num-threads-this-process) (- mesh-width width-start) thread-width)
+        real-length (if (= (inc rank) num-processes) (- mesh-length length-start) thread-length)]
+    (create-population real-width real-length width-start length-start)
     ))
 
 (defn print-message
@@ -83,10 +90,10 @@
         x (-> location :x)
         y (-> location :y)]
       (cond
-       (> chance 0.8) (Location. (inc-max x mesh-width) y)
-       (> chance 0.6) (Location. x (inc-max y mesh-length))
-       (> chance 0.4) (Location. (zero-dec x) y)
-       (> chance 0.2) (Location. x (zero-dec y))
+       (> chance 0.9) (Location. (inc-max x mesh-width) y)
+       (> chance 0.8) (Location. x (inc-max y mesh-length))
+       (> chance 0.7) (Location. (zero-dec x) y)
+       (> chance 0.6) (Location. x (zero-dec y))
        :else location)))
 
 (defn move-towards
@@ -105,12 +112,16 @@
 
 (defn distance
   [location person]
-  (distance-between location (-> person :location)))
+  (distance-between location (:location person)))
+
+(defn close-enough
+  [a b]
+  (>= purposeful-movement-threshold (distance-between a b)))
 
 (defn closest-person-to
   [location environment]
-  (let [closest (:location (first (sort-by (partial distance location) environment)))]
-    (if (> purposeful-movement-threshold (distance-between location closest)) closest (move-randomly location))))
+  (let [close-people (filter (fn [close-person] (close-enough location (:location close-person))) environment)]
+    (if (empty? close-people) (move-randomly location) (:location (rand-nth (sort-by (partial distance location) close-people))))))
 
 (defn change-location-zombie
   [zombie environment]
@@ -123,6 +134,14 @@
 (defn change-location
   [person environment]
   (if (= :zombie (:infection-status person)) (change-location-zombie person environment) (move-randomly (->  person :location))))
+
+(defn sort-by-x
+  [mesh]
+  (sort-by (fn [person] (-> person :location :x)) mesh))
+
+(defn sort-by-y
+  [mesh]
+  (sort-by (fn [person] (-> person :location :y)) mesh))
 
 (defn move-person
   [environment person]
@@ -147,13 +166,16 @@
   (for [person population :when (= (:location person) (:location under-test))] person))
 
 (defn can-be-infected
-  [zombies person]
-  (if (or (> chance-of-infection (rand)) (empty? (same-location person zombies))) person (assoc person :infection-status :zombie)))
+  [zombies people person]
+  (let [co-located-zombies (same-location person zombies)]
+    (if (or (empty? co-located-zombies) (> (rand) (/ (* (count co-located-zombies) chance-of-infection) (count (same-location person people))))) person (assoc person :infection-status :zombie)))
+  )
 
 (defn turn-to-zombies
   [population]
-  (let [zombies (zombies-from population)]
-    (map (partial can-be-infected zombies) population)))
+  (let [zombies (zombies-from population)
+        people (people-from population)]
+    (concat zombies (map (partial can-be-infected zombies people) people))))
 
 (defn move
   [previous]
@@ -161,23 +183,23 @@
 
 (defn neighbours
   [rank upper]
-  (for [x [(dec rank) (inc rank)] :when (and (>= x 0) (< x upper))] x))
+  (for [x [(dec rank) (inc rank)] :when (and (> x 0) (< x upper))] x))
 
 (defn my-neighbours [] (neighbours @my-rank @cluster-size))
 
-(defn read-updates
+(defn read-messages
   [message]
   (binding [*read-eval* true] (read-string message)))
 
-(defn write-updates
-  [updates]
-  (with-out-str (println updates)))
+(defn write
+  [population]
+  (with-out-str (println population)))
 
 (defn belongs-to?
   [rank person]
-  (let [process-length (/ mesh-length @cluster-size)
-        start (* process-length rank)
-        out-of-bound (* process-length (inc rank))
+  (let [process-length (inc (quot mesh-length (dec @cluster-size)))
+        start (* process-length (dec rank))
+        out-of-bound (* process-length rank)
         y-coordinate (-> person :location :y)]
     (and (>= y-coordinate start) (< y-coordinate out-of-bound))))
 
@@ -201,38 +223,40 @@
 (defn swap-with-neighbours
   [mesh]
   (do
-    (pmap (fn [neighbour]
-            (parallel/send-to (write-updates (updates-for-neighbour neighbour mesh)) neighbour)) (my-neighbours))
+    (parallel/send-to (write mesh) 0)
+    (doseq [neighbour (my-neighbours)]
+            (parallel/send-to (write (updates-for-neighbour neighbour mesh)) neighbour))
     (loop [mine (remove-all-that-have-moved-to-a-neighbour mesh)
            neighbour-count (count (my-neighbours))]
-
       (if (= 0 neighbour-count)
         mine
-        (recur (concat mine (read-updates (parallel/receive-from))) (dec neighbour-count))))))
+        (recur (concat mine (read-messages (parallel/receive-from))) (dec neighbour-count))))))
 
-(defn sort-by-x
-  [mesh]
-  (sort-by (fn [person] (-> person :location :x)) mesh))
 
 (defn parallel-move
   [mesh]
-  (flatten (reduce concat (pmap (fn [submesh] (move submesh)) (partition (quot (count mesh) num-threads) (sort-by-x mesh))))))
+  (reduce concat (pmap (fn [submesh] (move submesh)) (partition-all (inc (quot (count mesh) num-threads)) (sort-by-x mesh)))))
 
 (defn stop-processing?
   [mesh]
-  (println (str @my-rank " has " (count mesh) " with " (count (zombies-from mesh)) " zombies"))
+  (println (str "Cycle " @num-cycles " : "@my-rank " has " (count mesh) " people with " (count (zombies-from mesh)) " having turned into zombies"))
   (swap! num-cycles dec)
   (= 0 @num-cycles))
 
 (defn make-first-two-zombies
       [population]
       (let [zombie-one (make-zombie (first population))
-            zombie-two (make-zombie (first (rest population)))]
+            zombie-two (make-zombie ( second population))]
       (cons zombie-one (cons zombie-two (rest (rest population))))))
 
 (defn make-initial-zombie-population
   [population]
-  (if (= 0 @my-rank) (make-first-two-zombies population) population))
+  (if (= 1 @my-rank) (make-first-two-zombies population) population))
+
+(defn write-state
+  [mesh]
+  ;;(spit (str "state-" @my-rank ".out") (with-out-str (println mesh)) :append true)
+  )
 
 (defn move-population
   [initial]
@@ -243,11 +267,35 @@
 
 (defn process-mesh
   [rank size]
-  (reduce concat (pmap (fn [thread] (create-mesh rank thread size num-threads)) (range num-threads))))
+  (reduce concat (pmap (fn [thread] (create-mesh rank (dec thread) size num-threads)) (range num-threads))))
 
+(defn get-responses []
+  (reduce concat (map (fn [rank] (read-messages (parallel/receive-from (max-buffer-size)))) (take (dec @cluster-size) (range 1 @cluster-size)))))
+
+(defn locations-from [population]
+  (map (fn [person] (-> person :location)) population))
+
+(defn split-infected-responses
+  []
+  (let [responses (get-responses)]
+    [(locations-from (people-from responses)) (locations-from (zombies-from responses))]))
+
+(defn coordinate []
+  (let [frame (draw/create-frame mesh-width mesh-length)]
+    (loop [[people zombies] (split-infected-responses)
+           old-people []
+           old-zombies []
+           time 1]
+      (draw/draw-population frame people zombies old-people old-zombies time)
+      (if (= 499 time)
+        (println "FINISHED")
+        (recur (split-infected-responses) people zombies (inc time)))))
+  )
 (defn start-processing
   []
-  (move-population (process-mesh @my-rank @cluster-size)))
+  (if (> @my-rank 0)
+    (move-population (sort-by-y (process-mesh (dec @my-rank) (dec @cluster-size))))
+    (coordinate)))
 
 (defn -main
   [& args]
