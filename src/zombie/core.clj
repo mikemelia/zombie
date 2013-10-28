@@ -3,25 +3,44 @@
             [zombie.draw :as draw])
   (:gen-class))
 
-(def chance-of-infection 0.25)
+;; chance that a single zombie can infect an encountered human
+(def chance-of-infection 0.5)
+;; the chance that a human can kill a zombie
+(def chance-of-killing {:child 0.01 :adult 0.2 :elderly 0.05})
+;; if we are to move with purpose (i.e towards a nearby person/zombie) then the maximum distance to the target before we wander randomly
 (def purposeful-movement-threshold 32)
-(def num-cycles (atom 500))
+;; number of processing cycles (each cycle simulates an hour)
+(def max-cycles 1000)
+(def num-cycles (atom 0))
+;; the number of threads we will use for concurrency
 (def num-threads 10)
+;; real population stats
 ;;(def initial-population 233300)
 ;;(def mesh-width 1000)
 ;;(def mesh-length 1500)
+;; cut down population facts
 (def initial-population (* 4 2333))
 (def mesh-width 200)
 (def mesh-length 300)
 (def population-after-exodus (/ initial-population 2))
 (def population-per-square-km (/ population-after-exodus (* mesh-width mesh-length)))
 (def hostname (.getHostName (java.net.InetAddress/getLocalHost)))
+;; used to store the cluster size (i.e. number of participating processes)
 (def cluster-size (atom 1))
+;; my rank within the cluster
 (def my-rank (atom 0))
+;; used for the initial Mesh population creation
 (defrecord Mesh [rank thread x y width length population])
+;; the location coordinates
 (defrecord Location [x y])
+;; represents a person or a zombie
 (defrecord Person [gender age infection-status location])
+;; ensure we have enough of a buffer for inter-process comms
 (defn max-buffer-size [] (+ 100 (/ (* (+ 20 (count (with-out-str (println (->Person :female :adult :susceptible (->Location mesh-width mesh-length)))))) initial-population) (dec @cluster-size))))
+
+;;
+;; initial mesh creation
+;;
 (defn has-human?
   []
   (< (rand) population-per-square-km))
@@ -32,7 +51,10 @@
 
 (defn age?
   []
-  :adult)
+  (cond
+   (> (rand) 0.75) :child
+   (> (rand) 0.25) :adult
+   :else :elderly))
 
 (defn create-person
   [gender age status x y width-offset height-offset]
@@ -103,6 +125,21 @@
    (< to from) (dec from)
    :else from))
 
+(defn move-away
+  [to from]
+  (cond
+   (> to from) (inc from)
+   (< to from) (dec from)
+   :else from))
+
+(defn zombies-from
+  [population]
+  (for [person population :when (= :zombie (:infection-status person))] person))
+
+(defn people-from
+  [population]
+  (for [person population :when (= :susceptible (:infection-status person))] person))
+
 (defn distance-between
   [to from]
   (let [
@@ -118,22 +155,26 @@
   [a b]
   (>= purposeful-movement-threshold (distance-between a b)))
 
-(defn closest-person-to
+(defn closest-to
   [location environment]
   (let [close-people (filter (fn [close-person] (close-enough location (:location close-person))) environment)]
     (if (empty? close-people) (move-randomly location) (:location (rand-nth (sort-by (partial distance location) close-people))))))
 
-(defn change-location-zombie
-  [zombie environment]
-  (let [closest-person (closest-person-to (:location zombie) environment)
-        zombie-location (:location zombie)
-        x (move-towards (:x closest-person) (:x zombie-location))
-        y (move-towards (:y closest-person) (:y zombie-location))]
+(defn change-location-sensible
+  [subject environment movement-function ability-to-move-with-direction]
+  (let [closest (closest-to (:location subject) environment)
+        location (:location subject)
+        x (if (> ability-to-move-with-direction (rand)) (movement-function (:x closest) (:x location)) (:x location))
+        y (if (> ability-to-move-with-direction (rand)) (movement-function (:y closest) (:y location)) (:y location))]
     (->Location x y)))
 
 (defn change-location
   [person environment]
-  (if (= :zombie (:infection-status person)) (change-location-zombie person environment) (move-randomly (->  person :location))))
+  (cond
+   (= :zombie (:infection-status person)) (change-location-sensible person (people-from environment) move-towards 1.0)
+   (= :adult (:age person)) (change-location-sensible person (zombies-from environment) move-away 0.75)
+   (= :child (:age person)) (change-location-sensible person (people-from environment) move-towards 0.5)
+   :else (move-randomly (->  person :location))))
 
 (defn sort-by-x
   [mesh]
@@ -153,33 +194,37 @@
   (do (println "making a zombie")
     (assoc person :infection-status :zombie :location (move-randomly (-> person :location)))))
 
-(defn zombies-from
-  [population]
-  (for [person population :when (= :zombie (:infection-status person))] person))
-
-(defn people-from
-  [population]
-  (for [person population :when (= :susceptible (:infection-status person))] person))
-
 (defn same-location
   [under-test population]
   (for [person population :when (= (:location person) (:location under-test))] person))
 
-(defn can-be-infected
-  [zombies people person]
-  (let [co-located-zombies (same-location person zombies)]
-    (if (or (empty? co-located-zombies) (> (rand) (/ (* (count co-located-zombies) chance-of-infection) (count (same-location person people))))) person (assoc person :infection-status :zombie)))
-  )
+(defn survival [chance status person]
+  (if (> (rand) chance) person (assoc person :infection-status status)))
 
-(defn turn-to-zombies
-  [population]
-  (let [zombies (zombies-from population)
-        people (people-from population)]
-    (concat zombies (map (partial can-be-infected zombies people) people))))
+(defn combined-strength [people]
+  (/ (reduce + (map (fn [person] ((:age person) chance-of-killing)) people)) (count people)))
+
+(defn fight [zombies people]
+  (let [num-zombies (count zombies)
+        num-people (count people)]
+    (concat (map (partial survival (/ (* num-zombies chance-of-infection) num-people) :zombie) people) (map (partial survival (/ (combined-strength people) num-zombies) :really-dead) zombies))))
+
+(defn interaction [same-location]
+  (let [zombies (zombies-from same-location)
+        people (people-from same-location)]
+    (cond
+     (= 1 (count same-location)) same-location
+     (= 0 (count zombies)) people
+     (= 0 (count people)) zombies
+     :else (fight zombies people))))
+
+(defn handle-interaction [population]
+  (let [same-location (group-by :location population)]
+    (reduce concat (map interaction (vals same-location)))))
 
 (defn move
   [previous]
-  (map (partial move-person (people-from previous)) (turn-to-zombies previous)))
+  (map (partial move-person previous) (handle-interaction previous)))
 
 (defn neighbours
   [rank upper]
@@ -240,8 +285,8 @@
 (defn stop-processing?
   [mesh]
   (println (str "Cycle " @num-cycles " : "@my-rank " has " (count mesh) " people with " (count (zombies-from mesh)) " having turned into zombies"))
-  (swap! num-cycles dec)
-  (= 0 @num-cycles))
+  (swap! num-cycles inc)
+  (< max-cycles @num-cycles))
 
 (defn make-first-two-zombies
       [population]
@@ -252,11 +297,6 @@
 (defn make-initial-zombie-population
   [population]
   (if (= 1 @my-rank) (make-first-two-zombies population) population))
-
-(defn write-state
-  [mesh]
-  ;;(spit (str "state-" @my-rank ".out") (with-out-str (println mesh)) :append true)
-  )
 
 (defn move-population
   [initial]
@@ -275,21 +315,28 @@
 (defn locations-from [population]
   (map (fn [person] (-> person :location)) population))
 
+(defn filter-age [population age]
+  (filter (fn [person] (= age (:age person))) population))
+
 (defn split-infected-responses
   []
-  (let [responses (get-responses)]
-    [(locations-from (people-from responses)) (locations-from (zombies-from responses))]))
+  (let [responses (get-responses)
+        people (people-from responses)
+        zombies (zombies-from responses)
+        adults (filter-age people :adult)
+        children (filter-age people :child)
+        elderly (filter-age people :elderly)]
+    [(locations-from adults) (locations-from children) (locations-from elderly) (locations-from zombies)]))
 
 (defn coordinate []
   (let [frame (draw/create-frame mesh-width mesh-length)]
-    (loop [[people zombies] (split-infected-responses)
-           old-people []
-           old-zombies []
+    (loop [[adults children elderly zombies] (split-infected-responses)
            time 1]
-      (draw/draw-population frame people zombies old-people old-zombies time)
-      (if (= 499 time)
+      (if (= max-cycles time)
         (println "FINISHED")
-        (recur (split-infected-responses) people zombies (inc time)))))
+        (do
+          (draw/draw-population frame adults children elderly zombies time)
+          (recur (split-infected-responses) (inc time))))))
   )
 (defn start-processing
   []
