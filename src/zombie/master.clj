@@ -1,8 +1,8 @@
 (ns zombie.master
   (:use [zombie.parallel]
-        [zombie.draw]
+        [zombie.visualise]
         [zombie.data]
-        [zombie.common]
+        [zombie.dimensions]
         [zombie.serialise]
         [zombie.lifecycle]))
 
@@ -28,7 +28,7 @@
     (loop [[adults children elderly zombies] (split-infected-responses)
            time 1]
       (if (= max-cycles time)
-        (println "FINISHED")
+        (.dispose frame)
         (do
           (draw-population frame adults children elderly zombies time)
           (recur (split-infected-responses) (inc time))))))

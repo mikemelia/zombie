@@ -15,3 +15,15 @@
 
 (defn create-person [gender age status x y width-offset height-offset]
   (Person. gender age status (create-location (+ width-offset x) (+ height-offset y))))
+
+(defn zombies-from [population]
+  (for [person population :when (= :zombie (:infection-status person))] person))
+
+(defn people-from [population]
+  (for [person population :when (= :susceptible (:infection-status person))] person))
+
+(defn locations-from [population]
+  (map (fn [person] (-> person :location)) population))
+
+(defn filter-age [population age]
+  (filter (fn [person] (= age (:age person))) population))

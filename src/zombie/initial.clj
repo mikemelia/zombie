@@ -1,19 +1,11 @@
 (ns zombie.initial
-  (:use [zombie.common]
-        [zombie.data]))
+  (:use [zombie.data]
+        [zombie.dimensions]))
 
-(def population-after-exodus (/ initial-population 2))
-(def population-per-square-km (/ population-after-exodus (* mesh-width mesh-length)))
-
-;;
-;; initial mesh creation
-;;
-(defn gender?
-  []
+(defn gender? []
   (if (< 0.5 (rand)) :male :female))
 
-(defn age?
-  []
+(defn age? []
   (cond
    (> (rand) 0.75) :child
    (> (rand) 0.25) :adult
@@ -47,3 +39,6 @@
         real-width (if (= (inc thread) num-threads-this-process) (- mesh-width width-start) thread-width)
         real-length (if (= (inc rank) num-processes) (- mesh-length length-start) thread-length)]
     (create-population real-width real-length width-start length-start)))
+
+(defn process-mesh [rank size]
+  (reduce concat (pmap (fn [thread] (create-mesh rank (dec thread) size num-threads)) (range num-threads))))

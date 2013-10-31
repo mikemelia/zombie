@@ -1,4 +1,4 @@
-(ns zombie.draw
+(ns zombie.visualise
   (import (javax.swing JFrame)
           (java.awt Graphics2D Color)
           (java.awt.image BufferedImage)))
