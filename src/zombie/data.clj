@@ -1,3 +1,4 @@
+;; data structures
 (ns zombie.data)
 ;; the location coordinates
 (defrecord Location [x y])

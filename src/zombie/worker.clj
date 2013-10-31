@@ -1,3 +1,4 @@
+;; represents the processing perfomed by a worker process
 (ns zombie.worker
   (:use [zombie.data]
         [zombie.movement]

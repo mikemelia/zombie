@@ -1,3 +1,4 @@
+;; main processing loop
 (ns zombie.core
   (:use [zombie.parallel]
         [zombie.initial]

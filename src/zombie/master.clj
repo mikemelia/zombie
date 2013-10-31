@@ -1,3 +1,4 @@
+;; represents the processing performed by the master process
 (ns zombie.master
   (:use [zombie.parallel]
         [zombie.visualise]
@@ -24,7 +25,7 @@
     [(locations-from adults) (locations-from children) (locations-from elderly) (locations-from zombies)]))
 
 (defn monitor-state []
-  (let [frame (create-frame mesh-width mesh-length)]
+  (let [frame (create-frame mesh-width mesh-length downsize-factor)]
     (loop [[adults children elderly zombies] (split-infected-responses)
            time 1]
       (if (= max-cycles time)

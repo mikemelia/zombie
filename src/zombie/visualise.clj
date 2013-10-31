@@ -1,20 +1,23 @@
+;; responsible for visualising the spread of the zombie virus
 (ns zombie.visualise
   (import (javax.swing JFrame)
           (java.awt Graphics2D Color)
           (java.awt.image BufferedImage)))
 
+(def factor (atom 0))
 
 ;; Create the frame for displaying the visualisation
-(defn create-frame [x y]
+(defn create-frame [x y downsize-factor]
 (let [frame (JFrame. "ZOMBIES")]
+  (reset! factor downsize-factor)
     (doto frame
-      (.setSize (* 5 x) (* 5 y))
+      (.setSize (* @factor x) (* @factor y))
       (.setVisible true))
     frame))
 
 ;; draw a group of people (or zombies) on the graphics
 (defn draw [graphics population]
-  (doseq [location population] (.fillOval graphics (* 5 (-> location :x)) (* 5 (-> location :y)) 5 5)))
+  (doseq [location population] (.fillOval graphics (* @factor (-> location :x)) (* @factor (-> location :y)) @factor @factor)))
 
 (defn draw-population
   [frame adults children elderly infected time]
