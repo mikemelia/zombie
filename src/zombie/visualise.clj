@@ -16,12 +16,6 @@
 (defn draw [graphics population]
   (doseq [location population] (.fillOval graphics (* 5 (-> location :x)) (* 5 (-> location :y)) 5 5)))
 
-(defn draw-people [graphics population category color]
-  (let [candidates (filter (fn [person] (= category (:age person))) population)]
-      (do (println (str "candidates " (count candidates)))
-        (.setPaint graphics color)
-        (draw graphics candidates))))
-
 (defn draw-population
   [frame adults children elderly infected time]
   (let [graphics (.getGraphics frame)
