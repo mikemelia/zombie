@@ -32,8 +32,8 @@
       (recur (create-row mesh row width width-offset height-offset) (inc row)))))
 
 (defn create-mesh [rank thread num-processes num-threads-this-process]
-  (let [thread-width (inc (quot mesh-width num-threads-this-process))
-        thread-length (inc (quot mesh-length num-processes))
+  (let [thread-width (quot mesh-width num-threads-this-process)
+        thread-length (quot mesh-length num-processes)
         width-start (* thread thread-width)
         length-start (* rank thread-length)
         real-width (if (= (inc thread) num-threads-this-process) (- mesh-width width-start) thread-width)
@@ -41,4 +41,4 @@
     (create-population real-width real-length width-start length-start)))
 
 (defn process-mesh [rank size]
-  (reduce concat (pmap (fn [thread] (create-mesh rank (dec thread) size num-threads)) (range num-threads))))
+  (reduce concat (pmap (fn [thread] (create-mesh rank thread size num-threads)) (take num-threads (range)))))
